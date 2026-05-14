@@ -103,7 +103,7 @@ fn tick(chip: &mut Chip8) {
 
         //  Set register to value 6XNN
         0x6 => {
-            let register = (instruction & 0x0F00) >> 12;
+            let register = (instruction & 0x0F00) >> 8;
             let data = (instruction & 0x00FF) as u8;
 
             chip.v[register as usize] = data;
@@ -113,7 +113,7 @@ fn tick(chip: &mut Chip8) {
 
         // Add value to register 7XNN
         0x7 => {
-            let register = (instruction & 0x0F00) >> 12;
+            let register = (instruction & 0x0F00) >> 8;
             let data = (instruction & 0x00FF) as u8;
 
             chip.v[register as usize] += data;
