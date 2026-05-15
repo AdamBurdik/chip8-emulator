@@ -82,18 +82,10 @@ fn write_test_program_to_memory(chip: &mut Chip8) {
     chip.memory[0x200..0x200 + bytes.len()].copy_from_slice(&bytes);
 }
 
-fn tick(chip: &mut Chip8) {
-    // 1010 0000 0000 0000
-    let full = (chip.memory[chip.pc] as u16) << 8 | chip.memory[chip.pc + 1] as u16;
-    let opcode = ((full & 0xF000) >> 12) as u8;
-    let x = ((full & 0x0F00) >> 8) as u8;
-    let y = ((full & 0x00F0) >> 4) as u8;
-    let n = (full & 0x000F) as u8;
-    let nn = (full & 0x00FF) as u8;
-    let nnn = full & 0x0FFF;
-
-    let instruction = Instruction::new(opcode, x, y, n, nn, nnn);
-
+fn execute_instruction(
+    chip: &mut Chip8,
+    instruction: &Instruction
+) -> bool {
     // 0000 1010
     match instruction.opcode {
         // No data instructions
@@ -119,7 +111,7 @@ fn tick(chip: &mut Chip8) {
         // Jump 1NNN
         0x1 => {
             chip.pc = instruction.nnn as usize;
-            return;
+            return true;
         }
 
         // Call subroutine
@@ -127,6 +119,7 @@ fn tick(chip: &mut Chip8) {
             chip.stack.push(chip.pc as u16);
 
             chip.pc = instruction.nnn as usize;
+            return true;
         }
 
         // Condition - Equal 3XNN
@@ -140,7 +133,7 @@ fn tick(chip: &mut Chip8) {
         // Condition - Not Equals 4XNN
         0x4 => {
             let register_x = instruction.x;
-            if chip.v[register_x as usize] != instruction.n {
+            if chip.v[register_x as usize] != instruction.nn {
                 chip.pc += 2;
             }
         }
@@ -193,9 +186,7 @@ fn tick(chip: &mut Chip8) {
                     chip.v[0xF] = overflow as u8;
                 }
                 0x5 => {
-                    let no_borrow = chip.v[register_x] >= chip.v[register_y];
-                    let _ = chip.v[register_x].wrapping_sub(chip.v[register_y]);
-                    chip.v[0xF] = no_borrow as u8;
+                    chip.v[register_x] = chip.v[register_x].wrapping_sub(chip.v[register_y]);
                 }
                 0x6 => {
                     chip.v[register_x] = chip.v[register_y]; // This might break some programs
@@ -230,7 +221,7 @@ fn tick(chip: &mut Chip8) {
             let vx = chip.v[instruction.x as usize] as usize;
             let vy = chip.v[instruction.y as usize] as usize;
 
-            for row in 0..n as usize {
+            for row in 0..instruction.n as usize {
                 let byte = chip.memory[chip.i as usize + row];
                 for bit in 0..8 {
                     let pixel = (byte >> (7 - bit)) & 1;
@@ -242,7 +233,25 @@ fn tick(chip: &mut Chip8) {
                 }
             }
         }
+        // _ => panic!("Unknown instruction opcode: {:x}", instruction.opcode)
         _ => {}
+    }
+    false
+}
+
+fn tick(chip: &mut Chip8) {
+    // 1010 0000 0000 0000
+    let full = (chip.memory[chip.pc] as u16) << 8 | chip.memory[chip.pc + 1] as u16;
+    let opcode = ((full & 0xF000) >> 12) as u8;
+    let x = ((full & 0x0F00) >> 8) as u8;
+    let y = ((full & 0x00F0) >> 4) as u8;
+    let n = (full & 0x000F) as u8;
+    let nn = (full & 0x00FF) as u8;
+    let nnn = full & 0x0FFF;
+
+    let instruction = Instruction::new(opcode, x, y, n, nn, nnn);
+    if execute_instruction(chip, &instruction) {
+        return;
     }
 
     chip.pc += 2;
