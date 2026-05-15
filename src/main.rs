@@ -31,6 +31,21 @@ struct Chip8 {
     stack: Vec<u16>,
 }
 
+struct Instruction {
+    opcode: u8, // Technically u4
+    x: u8,      // Technically u4
+    y: u8,      // Technically u4
+    n: u8,      // Technically u4
+    nn: u8,
+    nnn: u16,   // Technically u12
+}
+
+impl Instruction {
+    pub fn new(opcode: u8, x: u8, y: u8, n: u8, nn: u8, nnn: u16) -> Self {
+        Self { opcode, x, y, n, nn, nnn }
+    }
+}
+
 impl Default for Chip8 {
     fn default() -> Self {
         Self {
@@ -69,15 +84,21 @@ fn write_test_program_to_memory(chip: &mut Chip8) {
 
 fn tick(chip: &mut Chip8) {
     // 1010 0000 0000 0000
-    let instruction = (chip.memory[chip.pc] as u16) << 8 | chip.memory[chip.pc + 1] as u16;
+    let full = (chip.memory[chip.pc] as u16) << 8 | chip.memory[chip.pc + 1] as u16;
+    let opcode = ((full & 0xF000) >> 12) as u8;
+    let x = ((full & 0x0F00) >> 8) as u8;
+    let y = ((full & 0x00F0) >> 4) as u8;
+    let n = (full & 0x000F) as u8;
+    let nn = (full & 0x00FF) as u8;
+    let nnn = full & 0x0FFF;
+
+    let instruction = Instruction::new(opcode, x, y, n, nn, nnn);
 
     // 0000 1010
-    let opcode = ((instruction & 0xF000) >> 12) as u8;
-    match opcode {
+    match instruction.opcode {
         // No data instructions
         0x0 => {
-            let rest = instruction & 0x0FFF;
-            match rest {
+            match instruction.nnn {
                 // Clear the screen 00E0
                 0x0E0 => {
                     for i in 0..WIDTH * HEIGHT {
@@ -97,88 +118,63 @@ fn tick(chip: &mut Chip8) {
 
         // Jump 1NNN
         0x1 => {
-            let data = instruction & 0x0FFF;
-            chip.pc = data as usize;
-
-            println!("Jumped to {:x}", data);
+            chip.pc = instruction.nnn as usize;
             return;
         }
 
         // Call subroutine
         0x2 => {
-            let data = instruction & 0x0FFF;
             chip.stack.push(chip.pc as u16);
 
-            chip.pc = data as usize;
+            chip.pc = instruction.nnn as usize;
         }
 
         // Condition - Equal 3XNN
         0x3 => {
-            let register_x = (instruction & 0x0F00) >> 8;
-            let data = (instruction & 0x00FF) as u8;
-
-            if chip.v[register_x as usize] == data {
+            let register_x = instruction.x;
+            if chip.v[register_x as usize] == instruction.nn {
                 chip.pc += 2;
             }
         }
 
         // Condition - Not Equals 4XNN
         0x4 => {
-            let register_x = (instruction & 0x0F00) >> 8;
-            let data = (instruction & 0x00FF) as u8;
-
-            if chip.v[register_x as usize] != data {
+            let register_x = instruction.x;
+            if chip.v[register_x as usize] != instruction.n {
                 chip.pc += 2;
             }
         }
 
         // Condition - Equals 5XY0
         0x5 => {
-            let register_x = (instruction & 0x0F00) >> 8;
-            let register_y = (instruction & 0x00F0) >> 4;
-
-            if chip.v[register_x as usize] == chip.v[register_y as usize] {
+            if chip.v[instruction.x as usize] == chip.v[instruction.y as usize] {
                 chip.pc += 2;
             }
         }
 
         // Condition - Equals 9XY0
         0x9 => {
-            let register_x = (instruction & 0x0F00) >> 8;
-            let register_y = (instruction & 0x00F0) >> 4;
-
-            if chip.v[register_x as usize] != chip.v[register_y as usize] {
+            if chip.v[instruction.x as usize] != chip.v[instruction.y as usize] {
                 chip.pc += 2;
             }
         }
 
         //  Set register to value 6XNN
         0x6 => {
-            let register = (instruction & 0x0F00) >> 8;
-            let data = (instruction & 0x00FF) as u8;
-
-            chip.v[register as usize] = data;
-
-            println!("Register {:x} set to {:x}", register, data);
+            chip.v[instruction.x as usize] = instruction.nn;
         }
 
         // Add value to register 7XNN
         0x7 => {
-            let register = (instruction & 0x0F00) >> 8;
-            let data = (instruction & 0x00FF) as u8;
-
-            chip.v[register as usize] += data;
-
-            println!("Register {:x} incremented by {:x}", register, data);
+            chip.v[instruction.x as usize] += instruction.nn;
         }
 
         // Arithmetic
         0x8 => {
-            let register_x = ((instruction & 0x0F00) >> 8) as usize;
-            let register_y = ((instruction & 0x00F0) >> 4) as usize;
-            let operation = instruction & 0x000F;
+            let register_x = instruction.x as usize;
+            let register_y = instruction.y as usize;
 
-            match operation {
+            match instruction.n {
                 0x0 => {
                     chip.v[register_x] = chip.v[register_y];
                 }
@@ -225,24 +221,16 @@ fn tick(chip: &mut Chip8) {
 
         // Set index register ANNN
         0xA => {
-            let data = instruction & 0x0FFF;
-
-            chip.i = data;
-
-            println!("Index register set to {:x}", data);
+            chip.i = instruction.nnn;
         }
 
         // Draw to display DXYN
         0xD => {
             // DXYN
-            let register_x = (instruction & 0x0F00) >> 8;
-            let register_y = (instruction & 0x00F0) >> 4;
-            let n = (instruction & 0x000F) as usize;
+            let vx = chip.v[instruction.x as usize] as usize;
+            let vy = chip.v[instruction.y as usize] as usize;
 
-            let vx = chip.v[register_x as usize] as usize;
-            let vy = chip.v[register_y as usize] as usize;
-
-            for row in 0..n {
+            for row in 0..n as usize {
                 let byte = chip.memory[chip.i as usize + row];
                 for bit in 0..8 {
                     let pixel = (byte >> (7 - bit)) & 1;
